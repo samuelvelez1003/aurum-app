@@ -1,0 +1,115 @@
+# Builds the Aurum Android APK from the private source repo (samuelvelez1003/Aurum)
+# and publishes it as the latest release of this public download repo:
+#   https://github.com/samuelvelez1003/aurum-app/releases/latest/download/aurum.apk
+#
+# Plain Gradle build (no EAS quota). Repository secrets:
+#   SOURCE_DEPLOY_KEY   read-only deploy key of samuelvelez1003/Aurum
+#   KEYSTORE_B64        base64 of the PKCS12 signing keystore (alias "aurum")
+#   KEYSTORE_PASSWORD   its password (store and key)
+#   MAPBOX_TOKEN        Mapbox public token (pk.…)
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit of the source repo
+        default: main
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://jdukcydiamagvxnyfmsk.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_mLXYqwFWUUQuR6mKNuqsSQ_mgbwlZES
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelvelez1003/Aurum
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: npm ci
+
+      - name: Public client values (.env is not in git)
+        env:
+          MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+        run: |
+          {
+            echo "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL"
+            echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+            echo "EXPO_PUBLIC_MAPBOX_TOKEN=$MAPBOX_TOKEN"
+          } > .env
+
+      - name: Generate the native Android project
+        run: npx expo prebuild --platform android --no-install --clean
+
+      - name: Release signing and version
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > android/app/aurum-release.p12
+          # Every build gets a higher versionCode so it installs over the previous one.
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" android/app/build.gradle
+          cat >> android/app/build.gradle <<'EOF'
+
+          android {
+              signingConfigs {
+                  aurum {
+                      storeFile file('aurum-release.p12')
+                      storeType 'pkcs12'
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias 'aurum'
+                      keyPassword System.getenv('KEYSTORE_PASSWORD')
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.aurum
+                  }
+              }
+          }
+          EOF
+
+      - name: Build APK
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          NODE_ENV: production
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Collect APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk aurum.apk && ls -la aurum.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurum-apk
+          path: aurum.apk
+          retention-days: 14
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Aurum Android ${{ github.run_number }}
+          body: Compilado desde samuelvelez1003/Aurum@${{ inputs.ref }}.
+          files: aurum.apk
+          make_latest: true
