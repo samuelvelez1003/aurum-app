@@ -1,7 +1,7 @@
-# Aurum · App para Android
+# Private Cab · App para Android
 
-Descarga la app de Aurum (taxi premium en Curazao):
+Descarga la app de Private Cab (taxi premium en Curazao):
 
-**[Descargar aurum.apk](https://github.com/samuelvelez1003/aurum-app/releases/latest/download/aurum.apk)**
+**[Descargar privatecab.apk](https://github.com/samuelvelez1003/privatecab-app/releases/latest/download/privatecab.apk)**
 
-Web: https://aurumcw.expo.app
+Web: https://privatecabcw.expo.app
