@@ -1,10 +1,10 @@
-# Builds the Aurum Android APK from the private source repo (samuelvelez1003/Aurum)
+# Builds the Private Cab Android APK from the private source repo (samuelvelez1003/PrivateCab)
 # and publishes it as the latest release of this public download repo:
-#   https://github.com/samuelvelez1003/aurum-app/releases/latest/download/aurum.apk
+#   https://github.com/samuelvelez1003/privatecab-app/releases/latest/download/privatecab.apk
 #
 # Plain Gradle build (no EAS quota). Repository secrets:
-#   SOURCE_DEPLOY_KEY   read-only deploy key of samuelvelez1003/Aurum
-#   KEYSTORE_B64        base64 of the PKCS12 signing keystore (alias "aurum")
+#   SOURCE_DEPLOY_KEY   read-only deploy key of samuelvelez1003/PrivateCab
+#   KEYSTORE_B64        base64 of the PKCS12 signing keystore (alias "privatecab")
 #   KEYSTORE_PASSWORD   its password (store and key)
 #   MAPBOX_TOKEN        Mapbox public token (pk.…)
 name: Build APK
@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: samuelvelez1003/Aurum
+          repository: samuelvelez1003/PrivateCab
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
 
@@ -66,24 +66,24 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          echo "$KEYSTORE_B64" | base64 -d > android/app/aurum-release.p12
+          echo "$KEYSTORE_B64" | base64 -d > android/app/privatecab-release.p12
           # Every build gets a higher versionCode so it installs over the previous one.
           sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" android/app/build.gradle
           cat >> android/app/build.gradle <<'EOF'
 
           android {
               signingConfigs {
-                  aurum {
-                      storeFile file('aurum-release.p12')
+                  privatecab {
+                      storeFile file('privatecab-release.p12')
                       storeType 'pkcs12'
                       storePassword System.getenv('KEYSTORE_PASSWORD')
-                      keyAlias 'aurum'
+                      keyAlias 'privatecab'
                       keyPassword System.getenv('KEYSTORE_PASSWORD')
                   }
               }
               buildTypes {
                   release {
-                      signingConfig signingConfigs.aurum
+                      signingConfig signingConfigs.privatecab
                   }
               }
           }
@@ -97,19 +97,19 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
 
       - name: Collect APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk aurum.apk && ls -la aurum.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk privatecab.apk && ls -la privatecab.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: aurum-apk
-          path: aurum.apk
+          name: privatecab-apk
+          path: privatecab.apk
           retention-days: 14
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: Aurum Android ${{ github.run_number }}
-          body: Compilado desde samuelvelez1003/Aurum@${{ inputs.ref }}.
-          files: aurum.apk
+          name: Private Cab Android ${{ github.run_number }}
+          body: Compilado desde samuelvelez1003/PrivateCab@${{ inputs.ref }}.
+          files: privatecab.apk
           make_latest: true
