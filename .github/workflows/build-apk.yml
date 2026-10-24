@@ -1,12 +1,15 @@
-# Builds the Private Cab Android APK from the private source repo (samuelvelez1003/PrivateCab)
-# and publishes it as the latest release of this public download repo:
-#   https://github.com/samuelvelez1003/privatecab-app/releases/latest/download/privatecab.apk
+# Builds the two Private Cab Android apps from the private source repo (samuelvelez1003/PrivateCab)
+# and publishes them as the latest release of this download repo:
+#   passengers  https://github.com/samuelvelez1003/privatecab-app/releases/latest/download/privatecab.apk
+#   chauffeurs  https://github.com/samuelvelez1003/privatecab-app/releases/latest/download/privatecab-chofer.apk
+# The chauffeur app (APP_VARIANT=driver: own package, name and icon) is only linked from
+# the admin console; the public website links the passenger app.
 #
 # Plain Gradle build (no EAS quota). Repository secrets:
 #   SOURCE_DEPLOY_KEY   read-only deploy key of samuelvelez1003/PrivateCab
 #   KEYSTORE_B64        base64 of the PKCS12 signing keystore (alias "privatecab")
 #   KEYSTORE_PASSWORD   its password (store and key)
-#   MAPBOX_TOKEN        Mapbox public token (pk.…)
+#   MAPBOX_TOKEN        Mapbox public token (pk.*)
 name: Build APK
 
 on:
@@ -27,9 +30,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: passenger
+            apk: privatecab.apk
+          - variant: driver
+            apk: privatecab-chofer.apk
     env:
       EXPO_PUBLIC_SUPABASE_URL: https://jdukcydiamagvxnyfmsk.supabase.co
       EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_mLXYqwFWUUQuR6mKNuqsSQ_mgbwlZES
+      APP_VARIANT: ${{ matrix.variant }}
+      EXPO_PUBLIC_APP_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +70,7 @@ jobs:
             echo "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL"
             echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
             echo "EXPO_PUBLIC_MAPBOX_TOKEN=$MAPBOX_TOKEN"
+            echo "EXPO_PUBLIC_APP_VARIANT=$EXPO_PUBLIC_APP_VARIANT"
           } > .env
 
       - name: Generate the native Android project
@@ -97,19 +111,32 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
 
       - name: Collect APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk privatecab.apk && ls -la privatecab.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk ${{ matrix.apk }} && ls -la ${{ matrix.apk }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: privatecab-apk
-          path: privatecab.apk
+          name: ${{ matrix.variant }}-apk
+          path: ${{ matrix.apk }}
           retention-days: 14
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: apks
+          merge-multiple: true
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
           name: Private Cab Android ${{ github.run_number }}
-          body: Compilado desde samuelvelez1003/PrivateCab@${{ inputs.ref }}.
-          files: privatecab.apk
+          body: |
+            Compilado desde samuelvelez1003/PrivateCab@${{ inputs.ref }}.
+            privatecab.apk: app de pasajeros · privatecab-chofer.apk: app de choferes.
+          files: |
+            apks/privatecab.apk
+            apks/privatecab-chofer.apk
           make_latest: true
