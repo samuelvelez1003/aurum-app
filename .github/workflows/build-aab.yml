@@ -1,0 +1,111 @@
+# Builds the Private Cab passenger app as an Android App Bundle (.aab) for Google Play.
+# The bundle is kept as a workflow artifact (not a public release): download it from the run
+# and upload it to Play Console. It is signed with the same PKCS12 keystore as the APKs
+# (alias "privatecab"), which acts as the Play upload key; Google signs what users install.
+# The chauffeur app stays out of Play (it is installed from the admin console's APK link).
+#
+# Same repository secrets as build-apk.yml: SOURCE_DEPLOY_KEY, KEYSTORE_B64,
+# KEYSTORE_PASSWORD, MAPBOX_TOKEN.
+name: Build AAB (Google Play)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit of the source repo
+        default: main
+
+concurrency:
+  group: build-aab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://jdukcydiamagvxnyfmsk.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_mLXYqwFWUUQuR6mKNuqsSQ_mgbwlZES
+      APP_VARIANT: passenger
+      EXPO_PUBLIC_APP_VARIANT: passenger
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: samuelvelez1003/PrivateCab
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: npm ci
+
+      - name: Public client values (.env is not in git)
+        env:
+          MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+        run: |
+          {
+            echo "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL"
+            echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
+            echo "EXPO_PUBLIC_MAPBOX_TOKEN=$MAPBOX_TOKEN"
+            echo "EXPO_PUBLIC_APP_VARIANT=$EXPO_PUBLIC_APP_VARIANT"
+          } > .env
+
+      - name: Generate the native Android project
+        run: npx expo prebuild --platform android --no-install --clean
+
+      - name: Upload-key signing and version
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > android/app/privatecab-release.p12
+          # Play only accepts a versionCode higher than the last upload: one per run.
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" android/app/build.gradle
+          cat >> android/app/build.gradle <<'EOF'
+
+          android {
+              signingConfigs {
+                  privatecab {
+                      storeFile file('privatecab-release.p12')
+                      storeType 'pkcs12'
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias 'privatecab'
+                      keyPassword System.getenv('KEYSTORE_PASSWORD')
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.privatecab
+                  }
+              }
+          }
+          EOF
+
+      - name: Build AAB
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          NODE_ENV: production
+        run: ./gradlew bundleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64
+
+      - name: Collect AAB
+        run: |
+          cp android/app/build/outputs/bundle/release/app-release.aab privatecab-${{ github.run_number }}.aab
+          ls -la privatecab-${{ github.run_number }}.aab
+          grep -E "versionCode|versionName" android/app/build.gradle | head -2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: privatecab-aab-${{ github.run_number }}
+          path: privatecab-${{ github.run_number }}.aab
+          retention-days: 30
